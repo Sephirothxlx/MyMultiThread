@@ -29,6 +29,7 @@ public:
 					{
 						std::unique_lock<std::mutex> lock(this->mu);
 						this->con.wait(lock,[this]{return this->stop||!this->tasks.empty();});
+						//stop!
 						if(this->stop&&this->tasks.empty())
 							return;
 						func=std::move(this->tasks.front());
@@ -40,20 +41,24 @@ public:
 		}
 	}
 
+	// nocopy
+    threadpool(const threadpool&)=delete;
+    threadpool& operator=(const threadpool&)=delete;
+
 	template<typename F, typename ...Args>
 	std::future<typename std::result_of<F(Args...)>::type> add(F&&f, Args&&... args){
 		typedef typename std::result_of<F(Args...)>::type return_type;
-		if(stop==true)
-            throw std::runtime_error("threadpool is stopped!");
 
         auto task = std::make_shared<std::packaged_task<return_type()>>(
             std::bind(std::forward<F>(f), std::forward<Args>(args)...)
         );
-	    std::future<return_type> future = task->get_future();
+	    std::future<return_type> future=task->get_future();
 
 	    //add to queue
 	    {
 	    	std::unique_lock<std::mutex> lock(mu);
+	    	if(stop==true)
+            	throw std::runtime_error("threadpool is stopped!");
 	    	tasks.emplace([task]{
 	    		(*task)();
 	    	});
@@ -66,6 +71,10 @@ public:
 		return stop;
 	}
 
+	void stopPool(){
+		stop=true;
+	}
+
 	int getSize(){
 		return size;
 	}
@@ -76,6 +85,7 @@ public:
 			stop=true;
 		}
 		con.notify_all();
+		//execute all the threads
 		for(std::thread &x:threads){
 			x.join();
 		}
